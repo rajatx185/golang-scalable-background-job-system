@@ -110,21 +110,24 @@ func main() {
 		println("timeout")
 	}
 
+	// if err := doSomething(); err != nil {
+    // return fmt.Errorf("doSomething failed: %w", err)
+	// }
 
 }
 
-func fetchWithTimeout(url string) (string, error) {
-result := make(chan string)
+// func fetchWithTimeout(url string) (string, error) {
+// result := make(chan string)
 
-go func() {
-	data := fetch(url)  // Slow network call
-	result <- data
-}()
+// go func() {
+// 	data := fetch(url)  // Slow network call
+// 	result <- data
+// }()
 
-select {
-case data := <-result:
-	return data, nil
-case <-time.After(5 * time.Second):
-	return "", errors.New("request timeout")
-}
-}
+// select {
+// case data := <-result:
+// 	return data, nil
+// case <-time.After(5 * time.Second):
+// 	return "", errors.New("request timeout")
+// }
+// }
