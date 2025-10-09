@@ -5,14 +5,14 @@ import (
 )
 
 // ✓ CORRECT - Global channel using var
-var globalCh = make(chan int)
+// var globalCh = make(chan int)
 
 // ✓ CORRECT - Declare type, initialize in init()
-var globalCh2 chan int
+// var globalCh2 chan int
 
-func init() {
-	globalCh2 = make(chan int)
-}
+// func init() {
+// 	globalCh2 = make(chan int)
+// }
 
 func main() {
 	// ✓ CORRECT - Local channel using :=
@@ -58,10 +58,73 @@ func main() {
 
 	println(<-bufch) // prints 1
 	println(<-bufch) // prints 2
-	v, ok := <- bufch
+	v, ok := <-bufch
 	if !ok {
 		println("Channel closed, no more values")
 	} else {
 		println(v)
 	}
+
+	// Loop over channel
+
+	loopCh := make(chan int) // Unbuffered channel
+	go func() {
+		for i := 1; i < 5; i++ {
+			loopCh <- i // Send and blocks until consumed
+		}
+		close(loopCh)
+	}()
+
+	for val := range loopCh { // Exits when channel closed
+		println("Looped value:", val) // Receive until channel closed
+	}
+
+	// Select statement with channels
+	globalCh := make(chan int)
+	// globalCh2 := make(chan int)
+
+	// Simulate sending messages to channels
+
+	go func() {
+		time.Sleep(3 * time.Second)
+		globalCh <- 100
+		// time.Sleep(1 * time.Second)
+		// globalCh2 <- 200
+	}()
+
+	// time.Sleep(500 * time.Millisecond) // Wait to ensure goroutine runs
+
+	// select {
+	// case msg := <-globalCh:
+	// 	println("Received from globalCh:", msg)
+	// case msg := <-globalCh2:
+	// 	println("Received from globalCh2:", msg)
+	// default: // makes it non-blocking it never waits
+	// 	println("No messages received")
+	// }
+
+	select {
+	case res := <-globalCh:
+		println(res)
+	case <-time.After(2 * time.Second):
+		println("timeout")
+	}
+
+
+}
+
+func fetchWithTimeout(url string) (string, error) {
+result := make(chan string)
+
+go func() {
+	data := fetch(url)  // Slow network call
+	result <- data
+}()
+
+select {
+case data := <-result:
+	return data, nil
+case <-time.After(5 * time.Second):
+	return "", errors.New("request timeout")
+}
 }
