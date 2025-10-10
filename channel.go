@@ -14,7 +14,7 @@ import (
 // 	globalCh2 = make(chan int)
 // }
 
-func main() {
+// func main() {
 	// ✓ CORRECT - Local channel using :=
 	localCh := make(chan int) // unbuffered channel
 

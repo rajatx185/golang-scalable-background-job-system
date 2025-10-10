@@ -5,7 +5,7 @@ import (
     "time"
 )
 
-var counter int
+// var counter int
 
 // func main() {
 //     for i := 0; i < 5; i++ {
