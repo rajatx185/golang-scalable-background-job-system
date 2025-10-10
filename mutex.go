@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-var counter int
+// var counter int
 // var mu sync.Mutex
 
 // func main() {

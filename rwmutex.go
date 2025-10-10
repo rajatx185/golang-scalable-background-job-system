@@ -22,19 +22,19 @@ func write(key string, value int) {
 	data[key] = value
 }
 
-func main() {
-	var wg sync.WaitGroup
-	for i:=0; i<5; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			write(fmt.Sprint(id), id)
-			fmt.Println("read:", read(fmt.Sprint(id)))
-		}(i)
-	}	
-	wg.Wait()
-	fmt.Println("Final data:", data)
-}
+// func main() {
+// 	var wg sync.WaitGroup
+// 	for i:=0; i<5; i++ {
+// 		wg.Add(1)
+// 		go func(id int) {
+// 			defer wg.Done()
+// 			write(fmt.Sprint(id), id)
+// 			fmt.Println("read:", read(fmt.Sprint(id)))
+// 		}(i)
+// 	}	
+// 	wg.Wait()
+// 	fmt.Println("Final data:", data)
+// }
 
 // How RWMutex Works Internally:
 // Think of RWMutex as having two types of locks:
