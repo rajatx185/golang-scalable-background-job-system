@@ -7,13 +7,13 @@ import (
 	// "runtime"
 )
 
-func worker(id int, wg *sync.WaitGroup) {
-	defer wg.Done()
-	fmt.Printf("Worker %d starting\n", id)
-	time.Sleep(time.Second)
-	fmt.Printf("Worker %d done\n", id)
-	// fmt.Printf("Alive goroutines %v\n", runtime.NumGoroutine())
-}
+// func worker(id int, wg *sync.WaitGroup) {
+// 	defer wg.Done()
+// 	fmt.Printf("Worker %d starting\n", id)
+// 	time.Sleep(time.Second)
+// 	fmt.Printf("Worker %d done\n", id)
+// 	// fmt.Printf("Alive goroutines %v\n", runtime.NumGoroutine())
+// }
 
 // func main() {
 // 	var wg sync.WaitGroup

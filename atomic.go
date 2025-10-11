@@ -6,19 +6,19 @@ import (
 	"sync/atomic"
 )
 
-var counter int64
+// var counter int64
 
-func main() {
-	var wg sync.WaitGroup
+// func main() {
+// 	var wg sync.WaitGroup
 
-	for i := 0; i < 1000; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			atomic.AddInt64(&counter, 1)
-		}()
-	}
+// 	for i := 0; i < 1000; i++ {
+// 		wg.Add(1)
+// 		go func() {
+// 			defer wg.Done()
+// 			atomic.AddInt64(&counter, 1)
+// 		}()
+// 	}
 
-	wg.Wait()
-	fmt.Println("Final Counter:", counter)
-}
+// 	wg.Wait()
+// 	fmt.Println("Final Counter:", counter)
+// }
