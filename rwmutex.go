@@ -6,8 +6,8 @@ import (
 )
 
 
-var data = make (map[string]int)
-var mu sync.RWMutex
+// var data = make (map[string]int)
+// var mu sync.RWMutex
 
 
 func read(key string) int {
