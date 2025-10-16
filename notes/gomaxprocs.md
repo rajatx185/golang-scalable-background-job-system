@@ -777,3 +777,271 @@ func workerPoolServer() {
 // It only runs out of CPU/memory to execute them efficiently
 // That's why you add rate limiting in production!
 ```
+
+# Thread Count vs CPU Cores
+
+## Short Answer
+
+**Yes, Go CAN and DOES create more threads than CPU cores.** This is not only possible but often necessary!
+
+## Why More Threads Than CPUs Makes Sense
+
+````go
+// Your intuition is right for CPU-bound work:
+runtime.GOMAXPROCS(runtime.NumCPU()) // Usually 8-16
+
+// But Go can create MANY more OS threads (M):
+runtime.SetMaxThreads(10000) // Default: 10,000 threads
+
+// Why? Because threads get BLOCKED on I/O!
+````
+
+## The Key Insight: Blocking I/O
+
+```go
+┌──────────────────────────────────────────────┐
+│ CPU-Bound: Threads = CPUs makes sense       │
+│ Thread never blocks, always computing       │
+└──────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────┐
+│ I/O-Bound: Need MORE threads than CPUs      │
+│ Thread blocks waiting for I/O response      │
+│ CPU sits idle if no extra threads!          │
+└──────────────────────────────────────────────┘
+```
+
+## What Happens When Thread Blocks
+
+````go
+package main
+
+import (
+    "fmt"
+    "net/http"
+    "runtime"
+    "time"
+)
+
+func demonstrateThreadCreation() {
+    runtime.GOMAXPROCS(4) // 4 P's (logical CPUs)
+    
+    fmt.Printf("GOMAXPROCS: %d\n", runtime.GOMAXPROCS(0))
+    fmt.Printf("Initial threads: %d\n", runtime.NumGoroutine())
+    
+    // Create goroutines that do BLOCKING I/O
+    for i := 0; i < 100; i++ {
+        go func(id int) {
+            // Blocking system call (file I/O, network, etc.)
+            resp, _ := http.Get("https://example.com")
+            if resp != nil {
+                resp.Body.Close()
+            }
+            
+            // While THIS goroutine waits for network response...
+            // Its M (thread) is BLOCKED
+            // Go creates a NEW thread to keep other goroutines running!
+        }(i)
+    }
+    
+    time.Sleep(1 * time.Second)
+    
+    // You'll see: Much more than 4 threads created!
+    fmt.Printf("After I/O operations, threads in use: Many more than GOMAXPROCS\n")
+}
+````
+
+## The Thread Lifecycle
+
+```
+SCENARIO: GOMAXPROCS = 4 (4 CPUs)
+
+Initial State:
+P1 → M1 (thread 1)
+P2 → M2 (thread 2)
+P3 → M3 (thread 3)
+P4 → M4 (thread 4)
+Total: 4 threads for 4 CPUs ✓
+
+Goroutine on M1 makes blocking syscall (disk read):
+❌ M1 is BLOCKED (waiting for disk)
+✅ P1 detaches from M1
+✅ Go creates M5 (new thread)
+✅ P1 attaches to M5
+✅ P1 continues running other goroutines!
+
+Now we have:
+P1 → M5 (thread 5) - Running
+P2 → M2 (thread 2) - Running
+P3 → M3 (thread 3) - Running
+P4 → M4 (thread 4) - Running
+M1 - Blocked on syscall (parked)
+Total: 5 threads for 4 CPUs ✓
+
+More blocking calls:
+M2 blocks → Creates M6
+M3 blocks → Creates M7
+...potentially up to 10,000 threads!
+```
+
+## Ideal Thread Count
+
+````go
+package main
+
+import "runtime"
+
+// For PURE CPU-bound work:
+func cpuBoundIdeal() {
+    // Threads = CPUs is perfect
+    runtime.GOMAXPROCS(runtime.NumCPU())
+    // Go will create ~NumCPU threads
+    // No need for more since nothing blocks
+}
+
+// For I/O-bound work:
+func ioBoundIdeal() {
+    runtime.GOMAXPROCS(runtime.NumCPU())
+    // But Go will create MANY more threads automatically!
+    // As goroutines block on I/O, new threads are created
+    
+    // You don't set thread count directly
+    // Go manages it automatically based on blocking patterns
+}
+
+// The formula:
+/*
+Active Threads = GOMAXPROCS + Blocked Threads
+
+Example:
+- GOMAXPROCS = 4
+- 10 goroutines blocked on network I/O
+- Active threads = 4 + 10 = 14 threads
+
+Go creates threads on-demand when blocking happens!
+*/
+````
+
+## Real-World Example
+
+````go
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "runtime"
+    "time"
+)
+
+func webServerExample() {
+    runtime.GOMAXPROCS(8) // 8-core machine
+    
+    // Handling 1000 concurrent requests
+    for i := 0; i < 1000; i++ {
+        go handleRequest(i)
+    }
+    
+    time.Sleep(5 * time.Second)
+}
+
+func handleRequest(id int) {
+    // 1. Database query (BLOCKS M/thread)
+    db.Query("SELECT * FROM users") // Thread blocked for 50ms
+    
+    // 2. External API call (BLOCKS M/thread)
+    http.Get("https://api.example.com") // Thread blocked for 100ms
+    
+    // 3. Redis call (BLOCKS M/thread)
+    redis.Get("key") // Thread blocked for 5ms
+    
+    // During each block:
+    // - This M (thread) is parked
+    // - P (processor) detaches and finds another M
+    // - If no M available, Go creates a new one
+    // - Other goroutines keep running!
+}
+
+/*
+With 1000 concurrent requests:
+- GOMAXPROCS = 8 (8 P's)
+- Each request blocks 3 times
+- Potentially 100+ threads created
+- But only 8 are ACTIVE at any moment
+- Rest are BLOCKED waiting for I/O
+*/
+````
+
+## Monitoring Threads
+
+````go
+package main
+
+import (
+    "fmt"
+    "runtime"
+    "time"
+)
+
+func monitorThreads() {
+    ticker := time.NewTicker(1 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        fmt.Printf("GOMAXPROCS: %d\n", runtime.GOMAXPROCS(0))
+        fmt.Printf("NumGoroutine: %d\n", runtime.NumGoroutine())
+        
+        // Note: No direct way to get thread count in Go
+        // But you can infer: More blocking = More threads
+    }
+}
+````
+
+## Key Takeaways
+
+| Aspect | Reality |
+|--------|---------|
+| **Can create more threads than CPUs?** | ✅ Yes, absolutely |
+| **Is it useful?** | ✅ Yes, for I/O-bound work |
+| **Who manages it?** | Go runtime (automatic) |
+| **Do you set it?** | No, it happens automatically |
+| **What you set** | GOMAXPROCS (parallel execution) |
+| **What Go manages** | Thread creation (based on blocking) |
+
+## The Formula
+
+```go
+Total Threads = GOMAXPROCS + Blocked Threads
+
+// Example 1: Pure CPU work
+// GOMAXPROCS = 8
+// Blocked threads = 0 (nothing blocks)
+// Total threads ≈ 8
+
+// Example 2: Web server (I/O heavy)
+// GOMAXPROCS = 8
+// Blocked threads = 50 (waiting on I/O)
+// Total threads ≈ 58
+
+// Go creates threads on-demand!
+```
+
+## Bottom Line
+
+```go
+// You configure parallelism (GOMAXPROCS):
+runtime.GOMAXPROCS(runtime.NumCPU()) // Usually 8-16
+
+// Go manages concurrency (thread creation):
+// - Creates threads when goroutines block
+// - Reuses threads when they unblock
+// - Can create up to 10,000 threads
+// - You don't control this directly
+
+// This is the MAGIC of Go's scheduler!
+```
+
+**Your intuition is correct for CPU-bound work, but I/O-bound work NEEDS more threads than CPUs because threads spend time blocked waiting!**
+
+
+I think my understanding as to how context switch happens between go routines is not fully complete. I thought if a go routine is blocked on an IO the OS thread will switch it with a new go routine but you are saying that the thread itself will be switched then in IO bound cases we will see similar performance as thread only system, if we were always creating new threads.a

@@ -7,28 +7,28 @@ import (
 
 var initialized bool
 
-func main() {
-	var once sync.Once
-	var wg sync.WaitGroup
+// func main() {
+// 	var once sync.Once
+// 	var wg sync.WaitGroup
 
-	initialize := func() {
-		initialized = true
-		// Complex initialization logic can go here
-	}
+// 	initialize := func() {
+// 		initialized = true
+// 		// Complex initialization logic can go here
+// 	}
 
-	for i := 0; i < 10; i++ {
-		// spawn a goroutine
-		go func() {
-			wg.Add(1)
-			defer wg.Done()
-			once.Do(initialize)
-			fmt.Println(initialized)
-		}()
-	}
+// 	for i := 0; i < 10; i++ {
+// 		// spawn a goroutine
+// 		go func() {
+// 			wg.Add(1)
+// 			defer wg.Done()
+// 			once.Do(initialize)
+// 			fmt.Println(initialized)
+// 		}()
+// 	}
 	
-	wg.Wait()
-	fmt.Println("All goroutines completed")
-}
+// 	wg.Wait()
+// 	fmt.Println("All goroutines completed")
+// }
 
 // Inside sync.Once simplified psedudo-code
 
