@@ -1,5 +1,3 @@
-Nice — welcome to **Golang Trainer** mode. Love that you want a hackathon-style, interview-ready sprint. I’ll give you a single, bite-sized **real-world project** that surfaces the Go skills hiring managers actually look for, plus a concrete roadmap, exact features to implement, code patterns to learn, testing/profiling checklist, and interview talking points. No fluff — just a practical, nerdy, battle-tested plan.
-
 # Project: Scalable Background Job System (like a minimal, production-grade Sidekiq / Bull)
 
 Think: an API to enqueue jobs, a scheduler, and a fleet of workers that process jobs reliably. Add metrics, tracing, graceful shutdown, retry/backoff, persistence, and autoscaling in a container. This hits concurrency, goroutines, channels, memory model, synchronization, networking, profiling, testing, modules, generics, and ops.
@@ -203,10 +201,3 @@ Implement deterministic backoff: `delay = min(base * 2^attempt, max)`. Explain i
 # Final pep-talk (short & nerdy)
 
 This single project gives you a compact, interview-friendly artifact that forces you to learn Go’s core strengths: lightweight concurrency, explicit context cancellation, low-allocation patterns, and solid ops hygiene. Build the MVP, then iterate on the stretches — each stretch is a new story you can narrate in interviews with concrete data (benchmarks, flamegraphs, metrics).
-
-If you want, I’ll:
-
-* generate a minimal starter repo layout and a complete `worker` implementation scaffold (with graceful shutdown, one queue backend, simple handler registry) right now; or
-* give you a 48-hour “sprint plan” with hourly tasks you can follow in a hackathon.
-
-Which of the two do you want me to produce next?
