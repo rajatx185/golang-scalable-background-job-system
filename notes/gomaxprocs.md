@@ -1045,3 +1045,323 @@ runtime.GOMAXPROCS(runtime.NumCPU()) // Usually 8-16
 
 
 I think my understanding as to how context switch happens between go routines is not fully complete. I thought if a go routine is blocked on an IO the OS thread will switch it with a new go routine but you are saying that the thread itself will be switched then in IO bound cases we will see similar performance as thread only system, if we were always creating new threads.a
+
+# Context Switching: The Critical Distinction
+
+You've hit on a **very important nuance**! Let me clarify the difference between **network I/O** (non-blocking) and **blocking syscalls** (blocking).
+
+## Two Types of I/O in Go
+
+### 1. **Network I/O (Non-Blocking) - Most Common**
+
+````go
+// This does NOT block the OS thread!
+resp, err := http.Get("https://api.com") // Network I/O
+
+// What actually happens:
+/*
+1. Goroutine initiates network request
+2. Go runtime parks the GOROUTINE (not the thread!)
+3. Thread (M) picks up ANOTHER goroutine from queue
+4. Thread stays active, running other goroutines
+5. When network response arrives (via epoll/kqueue)
+6. Original goroutine becomes runnable again
+*/
+````
+
+### 2. **Blocking Syscalls (Rare) - Creates New Thread**
+
+````go
+// This DOES block the OS thread
+file, _ := os.Open("file.txt")     // File I/O (syscall)
+file.Read(buffer)                   // Blocking read
+
+// What happens:
+/*
+1. Goroutine makes blocking syscall
+2. OS thread (M) blocks waiting for kernel
+3. Go runtime detaches P from this M
+4. P attaches to NEW/existing thread
+5. Other goroutines continue on new thread
+*/
+````
+
+## The Magic: Network I/O is Non-Blocking!
+
+````go
+package main
+
+import (
+    "fmt"
+    "net/http"
+    "runtime"
+    "time"
+)
+
+func demonstrateNonBlockingIO() {
+    runtime.GOMAXPROCS(2) // Only 2 threads initially
+    
+    fmt.Printf("Starting with %d threads\n", 2)
+    
+    // Launch 1000 HTTP requests
+    for i := 0; i < 1000; i++ {
+        go func(id int) {
+            // Network I/O - Does NOT block thread!
+            resp, _ := http.Get("https://httpbin.org/delay/1")
+            if resp != nil {
+                resp.Body.Close()
+            }
+            
+            // While waiting for response:
+            // - This GOROUTINE is parked
+            // - The THREAD continues running other goroutines!
+            // - NO new thread is created!
+        }(i)
+    }
+    
+    time.Sleep(2 * time.Second)
+    // Still only ~2 threads! All 1000 requests handled on 2 threads!
+}
+````
+
+## How Go Achieves This: The Netpoller
+
+```go
+/*
+Go's Network Poller (epoll on Linux, kqueue on macOS)
+┌──────────────────────────────────────────┐
+│  Thread 1 (M1 + P1)                      │
+│  ┌────────────────────────────────┐      │
+│  │ Running G1 (computing)         │      │
+│  └────────────────────────────────┘      │
+│                                           │
+│  G2: Waiting for network (parked)        │
+│  G3: Waiting for network (parked)        │
+│  G4: Waiting for network (parked)        │
+│  ...                                     │
+│  G1000: Waiting for network (parked)     │
+└──────────────────────────────────────────┘
+
+When network data arrives:
+1. OS signals via epoll/kqueue
+2. Netpoller marks goroutine as RUNNABLE
+3. Scheduler picks it up
+4. All on SAME thread! No thread creation!
+*/
+```
+
+## Visual Comparison
+
+### Network I/O (90% of web apps)
+
+```go
+Timeline of 1 Thread handling 3 HTTP requests:
+
+Thread M1:
+[G1: Send request]─[G2: Send request]─[G3: Send request]─[G1: Process response]─[G2: Process response]
+
+While G1 waits → Thread runs G2
+While G2 waits → Thread runs G3  
+While G3 waits → Thread runs G1 (response arrived)
+
+Result: 1 thread, 3 concurrent operations ✅
+No thread creation! Just goroutine switching!
+```
+
+### Blocking Syscalls (Rare)
+
+```go
+Timeline of blocking file I/O:
+
+Thread M1:
+[G1: os.Open()]──────[BLOCKED]──────→ (waiting on kernel)
+
+Thread M2 (newly created):
+[G2: Running]─[G3: Running]─[G4: Running]
+
+When G1's syscall completes:
+M1 returns to pool, G1 becomes runnable
+
+Result: 2 threads needed ❌
+Thread creation overhead!
+```
+
+## The Complete Picture
+
+````go
+package main
+
+import (
+    "fmt"
+    "net/http"
+    "os"
+    "runtime"
+    "time"
+)
+
+func completeExample() {
+    runtime.GOMAXPROCS(4) // 4 threads initially
+    
+    // Scenario 1: Network I/O (non-blocking)
+    for i := 0; i < 1000; i++ {
+        go func() {
+            // No new threads created!
+            // Goroutine parks, thread continues with others
+            http.Get("https://api.com")
+        }()
+    }
+    
+    // Scenario 2: Blocking syscalls
+    for i := 0; i < 10; i++ {
+        go func() {
+            // New threads created! (up to 10 more)
+            // Because thread blocks on kernel call
+            file, _ := os.Open("large_file.txt")
+            if file != nil {
+                file.Close()
+            }
+        }()
+    }
+    
+    time.Sleep(2 * time.Second)
+    
+    fmt.Printf("GOMAXPROCS: %d\n", runtime.GOMAXPROCS(0))
+    fmt.Printf("Total goroutines: %d\n", runtime.NumGoroutine())
+    // Threads: ~4 (for network) + ~10 (for file I/O) = ~14
+}
+````
+
+## Why Go is Still Better Than Thread-per-Request
+
+````go
+// Traditional thread-per-request (like Java without NIO):
+func traditionalThreadModel() {
+    // 1000 requests = 1000 threads
+    // Each thread: 2MB stack
+    // Total: 2GB memory
+    // Context switches: Kernel-level (expensive)
+}
+
+// Go with network I/O:
+func goNetworkModel() {
+    // 1000 requests = 1000 goroutines
+    // Running on: ~GOMAXPROCS threads (e.g., 8)
+    // Each goroutine: 2KB stack
+    // Total: 2MB memory
+    // Context switches: User-level (cheap)
+    
+    // Thread doesn't block, just switches goroutines!
+}
+
+// Go with blocking syscalls:
+func goBlockingModel() {
+    // If you have 100 blocking syscalls happening:
+    // 100 threads created temporarily
+    // But still better than 1000 threads!
+    // And threads are reused after syscall completes
+}
+````
+
+## Practical Example: Database Connection Pool
+
+````go
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "runtime"
+)
+
+func databaseExample() {
+    runtime.GOMAXPROCS(8)
+    
+    // Database with connection pool
+    db, _ := sql.Open("postgres", "...")
+    db.SetMaxOpenConns(20) // Only 20 connections
+    
+    // Handle 1000 concurrent requests
+    for i := 0; i < 1000; i++ {
+        go func(id int) {
+            // db.Query() uses network I/O internally
+            // Does NOT block OS thread!
+            // Goroutine waits, thread serves others
+            rows, _ := db.Query("SELECT * FROM users")
+            if rows != nil {
+                rows.Close()
+            }
+        }(i)
+    }
+    
+    /*
+    Result:
+    - 1000 goroutines
+    - Running on ~8 threads (GOMAXPROCS)
+    - 20 active database connections
+    - No thread blocking!
+    - Goroutines queue at connection pool, not threads
+    */
+}
+````
+
+## Key Insight: Modern I/O is Non-Blocking
+
+````go
+// These are NON-BLOCKING (don't create threads):
+http.Get()              // Network I/O
+net.Dial()              // TCP connections
+db.Query()              // Database (uses network internally)
+redis.Get()             // Redis (network)
+time.Sleep()            // Timer
+<-channel               // Channel operations
+
+// These ARE BLOCKING (may create threads):
+os.Open()               // File operations
+os.Read()               // File read
+syscall.Read()          // Direct syscalls
+cgo calls               // C function calls
+````
+
+## The Answer to Your Question
+
+> "If we were always creating new threads, wouldn't performance be similar to thread-only systems?"
+
+**No, because:**
+
+1. **90% of web app I/O is network I/O** → Non-blocking, no thread creation
+2. **Goroutine switching is 10x faster** than thread switching (200ns vs 2µs)
+3. **Threads are reused** after blocking calls complete
+4. **You only create threads when absolutely necessary** (actual blocking syscalls)
+
+````go
+// Performance comparison:
+Traditional: 1000 requests = 1000 threads created
+Go Network:  1000 requests = 0 new threads created (reuse existing)
+Go Blocking: 100 file ops = 100 threads created temporarily
+
+// Go is hybrid:
+// - Network I/O: Pure goroutine switching (fast!)
+// - Blocking I/O: Thread creation (only when needed)
+````
+
+## Final Mental Model
+
+```
+Your corrected understanding:
+
+Network I/O (http.Get, db.Query):
+┌─────────────────────────────────┐
+│ Goroutine parks                 │
+│ Thread continues with others    │ ← THIS is the common case!
+│ No thread creation              │
+└─────────────────────────────────┘
+
+Blocking Syscall (os.Open):
+┌─────────────────────────────────┐
+│ Thread blocks                   │
+│ New thread created              │ ← Rare, only for syscalls
+│ P switches to new thread        │
+└─────────────────────────────────┘
+```
+
+**Bottom line: Go's scheduler is smart enough to avoid thread creation for the most common case (network I/O), which is why it's so efficient for web applications!**
